@@ -27,3 +27,6 @@ perf.data
 
 # from regenerate_wiki_attributepage.sh
 Attribute-Reference.md
+
+# IntelliJ IDEs
+.idea

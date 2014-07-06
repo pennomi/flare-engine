@@ -25,6 +25,7 @@ FLARE.  If not, see http://www.gnu.org/licenses/
 
 using namespace std;
 
+#include "main.h"
 #include "Settings.h"
 #include "Stats.h"
 #include "GameSwitcher.h"
@@ -36,8 +37,8 @@ GameSwitcher *gswitch;
 /**
  * Game initialization.
  */
-static void init(const std::string render_device_name) {
-
+void init(const std::string render_device_name) {
+	srand((unsigned int)time(NULL));
 	setPaths();
 	setStatNames();
 
@@ -133,66 +134,83 @@ static void init(const std::string render_device_name) {
 	curs = new CursorManager();
 }
 
-static void mainLoop (bool debug_event) {
-	bool done = false;
-	int delay = int(floor((1000.f/MAX_FRAMES_PER_SEC)+0.5f));
-	int logic_ticks = SDL_GetTicks();
+int simulate(int logic_ticks, bool debug_event, int delay) {
+	int now_ticks = SDL_GetTicks();
 	int loops = 0;
-
-	while ( !done ) {
-		loops = 0;
-		int now_ticks = SDL_GetTicks();
-		int prev_ticks = now_ticks;
-
-		while (now_ticks > logic_ticks && loops < MAX_FRAMES_PER_SEC) {
-			// Frames where data loading happens (GameState switching and map loading)
-			// take a long time, so our loop here will think that the game "lagged" and
-			// try to compensate. To prevent this compensation, we mark those frames as
-			// "loading frames" and update the logic ticker without actually executing logic.
-			if (gswitch->isLoadingFrame()) {
-				logic_ticks = now_ticks;
-				break;
-			}
-
-			SDL_PumpEvents();
-			inpt->handle(debug_event);
-			gswitch->logic();
-			inpt->resetScroll();
-
-			// Engine done means the user escapes the main game menu.
-			// Input done means the user closes the window.
-			done = gswitch->done || inpt->done;
-
-			logic_ticks += delay;
-			loops++;
+	while (now_ticks > logic_ticks && loops < MAX_FRAMES_PER_SEC) {
+		// Frames where data loading happens (GameState switching and map loading)
+		// take a long time, so our loop here will think that the game "lagged" and
+		// try to compensate. To prevent this compensation, we mark those frames as
+		// "loading frames" and update the logic ticker without actually executing logic.
+		if (gswitch->isLoadingFrame()) {
+			logic_ticks = now_ticks;
+			break;
 		}
 
-		render_device->blankScreen();
-		gswitch->render();
+		SDL_PumpEvents();
+		inpt->handle(debug_event);
+		gswitch->logic();
+		inpt->resetScroll();
 
-		// display the FPS counter
-		// if the frame completed quickly, we estimate the delay here
-		now_ticks = SDL_GetTicks();
-		int delay_ticks = 0;
-		if (now_ticks - prev_ticks < delay) {
-			delay_ticks = delay - (now_ticks - prev_ticks);
-		}
-		if (now_ticks+delay_ticks - prev_ticks != 0) {
-			gswitch->showFPS(1000 / (now_ticks+delay_ticks - prev_ticks));
-		}
+		logic_ticks += delay;
+		loops++;
+	}
+	return logic_ticks;
+}
 
-		render_device->commitFrame();
+void render(int prev_ticks, int delay) {
+	render_device->blankScreen();
+	gswitch->render();
 
-		// delay quick frames
-		now_ticks = SDL_GetTicks();
-		if (now_ticks - prev_ticks < delay) {
-			SDL_Delay(delay - (now_ticks - prev_ticks));
-		}
+	// display the FPS counter
+	// if the frame completed quickly, we estimate the delay here
+	int now_ticks = SDL_GetTicks();
+	int delay_ticks = 0;
+	if (now_ticks - prev_ticks < delay) {
+		delay_ticks = delay - (now_ticks - prev_ticks);
+	}
+	if (now_ticks+delay_ticks - prev_ticks != 0) {
+		gswitch->showFPS(1000 / (now_ticks+delay_ticks - prev_ticks));
+	}
 
+	render_device->commitFrame();
+}
+
+void delay_loop(int prev_ticks, int delay) {
+	int now_ticks = SDL_GetTicks();
+	if (now_ticks - prev_ticks < delay) {
+		SDL_Delay(delay - (now_ticks - prev_ticks));
 	}
 }
 
-static void cleanup() {
+int game_ticks() {
+    return SDL_GetTicks();
+}
+
+bool done() {
+    return gswitch->done || inpt->done;
+}
+
+void mainLoop (bool debug_event) {
+	int delay = int(floor((1000.f/MAX_FRAMES_PER_SEC)+0.5f));
+	int logic_ticks = SDL_GetTicks();
+
+	while ( !done() ) {
+		int now_ticks = SDL_GetTicks();
+		int prev_ticks = now_ticks;
+
+		// Execute the game logic
+		logic_ticks = simulate(logic_ticks, debug_event, delay);
+
+		// Render to screen
+		render(prev_ticks, delay);
+
+		// delay quick frames
+		delay_loop(prev_ticks, delay);
+	}
+}
+
+void cleanup() {
 	delete gswitch;
 
 	delete anim;
@@ -213,8 +231,8 @@ static void cleanup() {
 	SDL_Quit();
 }
 
-string parseArg(const string &arg) {
-	string result = "";
+std::string parseArg(const std::string &arg) {
+	std::string result = "";
 
 	// arguments must start with '--'
 	if (arg.length() > 2 && arg[0] == '-' && arg[1] == '-') {
@@ -227,8 +245,8 @@ string parseArg(const string &arg) {
 	return result;
 }
 
-string parseArgValue(const string &arg) {
-	string result = "";
+std::string parseArgValue(const std::string &arg) {
+	std::string result = "";
 	bool found_equals = false;
 
 	for (unsigned i = 0; i < arg.length(); ++i) {
@@ -247,7 +265,7 @@ int main(int argc, char *argv[]) {
 	std::string render_device_name = "";
 
 	for (int i = 1 ; i < argc; i++) {
-		string arg = string(argv[i]);
+		std::string arg = std::string(argv[i]);
 		if (parseArg(arg) == "debug-event") {
 			debug_event = true;
 		}
@@ -275,7 +293,6 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (!done) {
-		srand((unsigned int)time(NULL));
 		init(render_device_name);
 		mainLoop(debug_event);
 		cleanup();
